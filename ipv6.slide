@@ -1,0 +1,309 @@
+IPv6
+or How i stopped worrying and learned to love dual stack systems
+2 May 2016
+
+Andrea Lusuardi
+uovobw
+uovobw@gmail.com
+@uovobw
+
+* IPv6
+
+- No more IPv4 addresses (an emergency since the '80s!)
+- We need to move on
+- Time to play a bit
+
+* Addressing and subnetting
+
+- Unicast
+
+    |--- 48 (or more) ---|--- 16 (or fewer) ---|---                 64                  ---|
+    |   routing prefix   | subnet identifier   |          interface identifier             |
+
+- Link Local
+
+    |--- 10 ---|---           54            ---|---                 64                  ---|
+    |  prefix  |            zeroes             |          interface identifier             |
+
+- Multicast
+
+    out of scope, go look on wikipedia
+
+* Addressing and subnetting
+
+	2001:0db8:0123:4567:89ab:cdef:1234:5678
+	|||| |||| |||| |||| |||| |||| |||| ||||
+	|||| |||| |||| |||| |||| |||| |||| |||128     Single end-points and loopback
+	|||| |||| |||| |||| |||| |||| |||| |||127   Point-to-point links (inter-router)
+	|||| |||| |||| |||| |||| |||| |||| ||124
+	<omitted for clarity since empty>
+	|||| |||| |||| |||| 68
+	|||| |||| |||| |||64   Single End-user LAN (default prefix size for SLAAC)
+	|||| |||| |||| ||60   Some (very limited) 6rd deployments (/60 = 16 /64)
+	|||| |||| |||| |56   Minimal end sites assignment[3] (e.g. Home network) (/56 = 256 /64)
+	|||| |||| |||| 52   (/52 = 4096 /64)
+	|||| |||| |||48   Typical assignment for larger sites (/48 = 65536 /64)
+	|||| |||| ||44
+	|||| |||| |40
+	|||| |||| 36   possible future Local Internet registry extra-small allocations
+	|||| |||32   Local Internet registry minimum allocations
+	|||| ||28   Local Internet registry medium allocations
+	|||| |24   Local Internet registry large allocations
+	|||| 20   Local Internet registry extra large allocations
+	|||16
+	||12   Regional Internet Registry allocations from IANA[4]
+	|8
+	4
+
+* The problem with many providers
+
+Many providers only assign a /64 address
+
+Ideally you can use an address on that interface, like a:b:c:d::X/64
+
+A bad idea, you lose:
+- Neighbour Discovery
+- SLAAC (Autoconfiguration)
+- Privacy extensions (think ipsec)
+- ...
+
+google and other sites will be very angry (captcha etc)
+
+* Proper routing
+
+Tools used
+
+.link https://www.tinc-vpn.org/ tinc
+.link http://www.litech.org/radvd/ radvd
+.link http://rdnssd.linkfanel.net/ rdnssd
+
+* tinc
+
+software to create a VPN network (layer 2/3)
+
+- mesh network
+- encryption
+- open source
+- compression
+- ssl public/private key system (can use ssh keys)
+
+* tinc
+
+different modes:
+
+Router
+- routing table
+- only routable protocols
+- requires managing the subnets in-program
+Switch
+- as a real switch
+- everything that runs on Ethernet
+- will do ARP / routing table updates
+Hub
+- the name says it all
+
+* tinc
+
+typical configuration tree
+
+/etc/tinc/nets.boot
+/etc/tinc/<net_name>
+/etc/tinc/<net_name>/hosts
+/etc/tinc/<net_name>/hosts/tapiri
+/etc/tinc/<net_name>/hosts/...
+/etc/tinc/<net_name>/tinc-up
+/etc/tinc/<net_name>/tinc-down
+/etc/tinc/<net_name>/rsa_key.priv
+/etc/tinc/<net_name>/rsa_key.pub
+/etc/tinc/<net_name>/tinc.conf
+
+* tinc
+
+configuration
+
+/etc/tinc/<net_name>/tinc.conf
+
+	Name = baol
+	Device = /dev/net/tun
+	Mode = switch
+	ConnectTo = tapiri
+
+* tinc
+
+/etc/tinc/<net_name>/hosts/tapiri
+
+	Address tapiri.org
+	-----BEGIN RSA PUBLIC KEY-----
+	MIICCgKCAgEA0gpQsOVQkTv/T37A6Tu2clTExZcH4ppuF3c7T84qHseB36/+J8en
+	...
+	JSfgX+NsfOlqK6Z4C8rrxxhB//BsQNU7KGpqMY7PNIqHOn+oYwH4xvECAwEAAQ==
+	-----END RSA PUBLIC KEY-----
+
+* tinc
+
+/etc/tinc/<net_name>/tinc-up
+
+	#!/bin/bash
+	
+	ip -6 addr add 2a01:a:b:c::2/64 dev ${INTERFACE}
+	ip link set dev ${INTERFACE} up
+
+* tinc
+
+/etc/tinc/<net_name>/tinc-down
+
+	#!/bin/bash
+	
+	ip -6 addr del 2a01:a:b:c::2/64 dev ${INTERFACE}
+	ip link set dev ${INTERFACE} down
+
+* tinc
+
+private key generation
+
+	tincd -n <net_name> -K<key_size>
+
+typical output
+
+	root@baol:~# tincd -K4096 -n <net_name>
+	Cannot open config file /etc/tinc/<net_name>/tinc.conf: No such file or directory
+	Failed to read `/etc/tinc/<net_name>/tinc.conf': No such file or directory
+	Generating 4096 bits keys:
+	.......................++ p
+	.....................................................................................................................................................................................................................++ q
+	Done.
+	Please enter a file to save private RSA key to [/etc/tinc/<net_name>/rsa_key.priv]:
+	Please enter a file to save public RSA key to [/etc/tinc/<net_name>/rsa_key.pub]:
+`
+
+* tinc
+
+running, usually via
+
+	tincd -d 2 -D --logfile -n <net_name>
+
+it will produce a log similar to
+
+	tinc.ip6tapiri[21492]: tincd 1.0.28 starting, debug level 2
+	tinc.ip6tapiri[21492]: /dev/net/tun is a Linux tun/tap device (tap mode)
+	tinc.ip6tapiri[21492]: Listening on 0.0.0.0 port 655
+	tinc.ip6tapiri[21492]: Listening on :: port 655
+	tinc.ip6tapiri[21492]: Ready
+	tinc.ip6tapiri[21492]: Connection from x.y.z.w port 44682
+	tinc.ip6tapiri[21492]: Connection with baol (x.y.z.w port 44682) activated
+
+* tinc
+
+automatically running
+
+/etc/default/tinc
+
+	# Extra options to be passed to tincd.
+	EXTRA="-d 2 --logfile"
+
+* tinc
+
+what we have so far:
+
+ip-over-udp tunnel
+tap mode device on remote and local server
+the hosts/ configuration dir is distributable, only public keys and addresses
+
+
+
+conceptually similar to
+.link http://vde.sourceforge.net/ VDE2
+
+* /etc/network/interfaces
+
+automatically setting up the additional host address
+
+	iface eth0 inet6 static
+	    address 2a01:a:b:c:::2
+	    netmask 64
+	    gateway fe80::1
+	    up ip -6 addr add 2a01:a:b:c::2/64 dev $IFACE
+	    down ip -6 addr del 2a01:a:b:c::2/64 dev $IFACE
+
+* radvd
+
+Router Advertisement Daemon
+
+- implements NDP
+- allows for SLAAC
+
+alternatives: DHCPv6 (good luck with that)
+
+* radvd
+
+configuration /etc/radvd.conf
+
+	interface <net_name>
+	{
+	    AdvSendAdvert on;
+	    AdvManagedFlag off;
+	    AdvLinkMTU 1280;
+	    MaxRtrAdvInterval 30;
+	    AdvOtherConfigFlag off;
+		prefix 2a01:a:b:c::/64 {
+	        AdvOnLink on;
+	        AdvAutonomous on;
+		};
+	    RDNSS 2001:4860:4860::8888
+		{
+	        AdvRDNSSPreference 8;
+	        AdvRDNSSLifetime 60;
+	    };
+	};
+
+* rdnssd
+
+- receives RDNSS advertisements from radvd
+- inserts them in the /etc/resolv.conf file to allow for dns-over-ipv6 resolution of dns addresses
+- merge hooks
+
+* rdnssd
+
+debian specific change (not tested on other distro, so YMMV)
+requires the package
+
+	resolvconf
+
+and to add
+
+	*.rdnssd
+
+on top of the file
+
+	/etc/resolvconf/interface-order
+
+* changes on the server
+
+sysctl in /etc/sysctl.conf
+
+	net.ipv6.conf.eth0.forwarding = 1
+
+during live/tests in /proc
+
+	/proc/sys/net/ipv6/conf/all/forwarding
+
+* finally
+
+	uovobw@baol:~$ ping6 ipv6.google.com
+	PING ipv6.google.com(fra16s07-in-x0e.1e100.net (2a00:1450:4001:816::200e)) 56 data bytes
+	64 bytes from fra16s07-in-x0e.1e100.net (2a00:1450:4001:816::200e): icmp_seq=1 ttl=56 time=5.62 ms
+	64 bytes from fra16s07-in-x0e.1e100.net (2a00:1450:4001:816::200e): icmp_seq=2 ttl=56 time=5.58 ms
+	64 bytes from fra16s07-in-x0e.1e100.net (2a00:1450:4001:816::200e): icmp_seq=3 ttl=56 time=5.64 ms
+
+
+* live demo
+
+* todo
+
+- security considerations
+- multiple interfaces
+- performance evaluation
+- dns / persistent autoconfigured addresses
+- ...
+
+* questions?
